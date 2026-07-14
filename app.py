@@ -1,168 +1,199 @@
 import streamlit as st
 import pandas as pd
+import os
 from datetime import datetime
 
-# ตั้งค่าหน้าแอป
-st.set_page_config(page_title="My Fitness Tracker", page_icon="💪", layout="wide")
+# ตั้งค่าหน้าจอแอป
+st.set_page_config(page_title="Personalized Fitness App V3", page_icon="🏋️‍♂️", layout="wide")
 
-# 1. เริ่มต้นระบบเก็บข้อมูล (State Management) เพื่อให้แอปจำค่าที่ปรับเปลี่ยนได้
-if 'workout_program' not in st.session_state:
-    st.session_state.workout_program = {
-        "Push Day": [
-            {"name": "Dumbbell Floor Press", "sets": 4, "reps": 12},
-            {"name": "Dumbbell Shoulder Press", "sets": 3, "reps": 12},
-            {"name": "Lateral Raise", "sets": 4, "reps": 15},
-            {"name": "Dumbbell Tricep Kickback", "sets": 3, "reps": 12}
-        ],
-        "Pull Day": [
-            {"name": "Dumbbell Row", "sets": 4, "reps": 12},
-            {"name": "Dumbbell Bicep Curl", "sets": 3, "reps": 12},
-            {"name": "Hammer Curl", "sets": 3, "reps": 12},
-            {"name": "Plank / Bird-Dog", "sets": 3, "reps": 45} # วินาที
-        ],
-        "Legs & Core": [
-            {"name": "Goblet Squat", "sets": 4, "reps": 12},
-            {"name": "Dumbbell Romanian Deadlift", "sets": 4, "reps": 12},
-            {"name": "Lying Leg Raise", "sets": 3, "reps": 15},
-            {"name": "Bicycle Crunch", "sets": 3, "reps": 20}
-        ],
-        "Rest Day": [
-            {"name": "Active Recovery (Stretching เบาๆ)", "sets": 1, "reps": 10},
-            {"name": "Vestibular Exercise (ฝึกบาลานซ์/หูชั้นใน)", "sets": 1, "reps": 5}
-        ]
-    }
+# กำหนดชื่อไฟล์ฐานข้อมูลจำลอง
+USER_DB = "users_db.csv"
+WORKOUT_DB = "workout_db.csv"
+PROTEIN_DB = "protein_db.csv"
 
-if 'history' not in st.session_state:
-    st.session_state.history = []
+# ฟังก์ชันจัดการไฟล์ CSV
+def load_db(file_name, columns):
+    if os.path.exists(file_name):
+        return pd.read_csv(file_name)
+    return pd.DataFrame(columns=columns)
 
-# ส่วนหัวของแอป
-st.title("💪 Personal Workout & Nutrition Tracker")
-st.subheader(f"ประจำวันที่: {datetime.now().strftime('%d/%m/%Y')}")
-st.markdown("---")
+def save_db(df, file_name):
+    df.to_csv(file_name, index=False)
 
-# แบ่งหน้าจอเป็น 2 ฝั่ง (ฝั่งซ้าย: บันทึกประจำวัน / ฝั่งขวา: ปรับแต่งท่าและเป้าหมาย)
-tab1, tab2 = st.tabs(["🏋️ บันทึกการออกกำลังกาย & โปรตีน", "⚙️ ปรับแต่งท่าออกกำลังกาย"])
+# โหลดฐานข้อมูลหลักเข้าสู่ระบบ
+df_users = load_db(USER_DB, ["username", "password", "weight", "height", "bmi", "protein_target"])
+df_workout = load_db(WORKOUT_DB, ["username", "date", "program", "status"])
+df_protein = load_db(PROTEIN_DB, ["username", "date", "amount"])
+
+# ระบบ Login / Session State
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+    st.session_state.username = ""
+    st.session_state.user_info = {}
 
 # ==========================================
-# TAB 1: บันทึกการออกกำลังกาย & โปรตีน
+# หน้าจอการยืนยันตัวตน (LOGIN / SIGN UP)
 # ==========================================
-with tab1:
-    col1, col2 = st.columns([2, 1])
+if not st.session_state.logged_in:
+    st.title("🔐 เข้าสู่ระบบแอปฟิตเนสส่วนบุคคล")
+    auth_tab1, auth_tab2 = st.tabs(["🔒 ล็อกอินเข้าใช้งาน", "📝 สมัครสมาชิกใหม่ (คำนวณเป้าหมายส่วนตัว)"])
     
-    with col1:
-        st.header("วันนี้คุณจะเล่นส่วนไหน?")
-        day_type = st.selectbox("เลือกโปรแกรมของวันนี้:", list(st.session_state.workout_program.keys()))
+    with auth_tab1:
+        login_user = st.text_input("ชื่อผู้ใช้งาน (Username):", key="login_u")
+        login_pass = st.text_input("รหัสผ่าน (Password):", type="password", key="login_p")
         
-        # เตือนความปลอดภัยก่อนเริ่ม
-        st.warning("⚠️ **ก่อนเริ่มเล่น:** อย่าลืมวอร์มอัพด้วยท่า **Cat-Cow Stretch (2-3 นาที)** เพื่อคลายกระดูกสันหลังและเซฟหลังส่วนล่างนะครับ")
-        
-        st.subheader(f"📋 รายการท่าสำหรับ {day_type}")
-        st.caption("ติ๊กถูกเมื่อเล่นครบตามเซ็ตที่กำหนด")
-        
-        # แสดงรายการท่าตามที่ตั้งค่าไว้
-        all_completed = True
-        for idx, exercise in enumerate(st.session_state.workout_program[day_type]):
-            label = f"**{exercise['name']}** — {exercise['sets']} เซ็ต x {exercise['reps']} ครั้ง"
-            checked = st.checkbox(label, key=f"ex_{day_type}_{idx}")
-            if not checked:
-                all_completed = False
+        if st.button("เข้าสู่ระบบ", type="primary"):
+            user_check = df_users[(df_users["username"] == login_user) & (df_users["password"] == str(login_pass))]
+            if not user_check.empty:
+                st.session_state.logged_in = True
+                st.session_state.username = login_user
+                st.session_state.user_info = user_check.to_dict('records')[0]
+                st.success("เข้าสู่ระบบสำเร็จ!")
+                st.rerun()
+            else:
+                st.error("ชื่อผู้ใช้งานหรือรหัสผ่านไม่ถูกต้อง")
                 
-        st.markdown("---")
+    with auth_tab2:
+        st.subheader("สร้างบัญชีผู้ใช้พร้อมคำนวated สุขภาพ")
+        new_user = st.text_input("ตั้งชื่อผู้ใช้งาน (ภาษาอังกฤษ):", key="new_u")
+        new_pass = st.text_input("ตั้งรหัสผ่าน:", type="password", key="new_p")
         
-        # ปุ่มบันทึกกิจกรรมลงประวัติ
-        if st.button("💾 บันทึกกิจกรรมวันนี้ลง Log", type="primary"):
-            status_text = "เสร็จสมบูรณ์ทั้งหมด" if all_completed else "เล่นบางส่วน"
-            log_entry = {
-                "วันที่": datetime.now().strftime('%Y-%m-%d'),
-                "โปรแกรม": day_type,
-                "สถานะ": status_text
-            }
-            st.session_state.history.append(log_entry)
-            st.success(f"บันทึกข้อมูล {day_type} เรียบร้อยแล้ว!")
-
-    with col2:
-        st.header("🥩 แทร็กโปรตีนวันนี้")
-        st.caption("เป้าหมายของคุณ: **80 - 110 กรัม / วัน**")
-        
-        protein_input = st.number_input("เติมปริมาณโปรตีนที่ทานเพิ่ม (กรัม):", min_value=0, max_value=300, value=0, step=5)
-        
-        if 'today_protein' not in st.session_state:
-            st.session_state.today_protein = 0
+        col_w, col_h = st.columns(2)
+        with col_w:
+            weight = st.number_input("น้ำหนักตัว (กิโลกรัม):", min_value=10.0, max_value=200.0, value=65.0, step=0.1)
+        with col_h:
+            height = st.number_input("ส่วนสูง (เซนติเมตร):", min_value=100.0, max_value=250.0, value=170.0, step=0.1)
             
-        if st.button("➕ เพิ่มโปรตีน"):
-            st.session_state.today_protein += protein_input
-            st.experimental_rerun()
-            
-        if st.button("🔄 รีเซ็ตโปรตีนวันนี้"):
-            st.session_state.today_protein = 0
-            st.experimental_rerun()
-            
-        # แสดงผลความคืบหน้าของโปรตีน
-        current_p = st.session_state.today_protein
-        st.metric(label="โปรตีนที่ได้รับวันนี้", value=f"{current_p} กรัม")
-        
-        if current_p >= 80 and current_p <= 110:
-            st.success("🎉 ยอดเยี่ยม! โปรตีนอยู่ในเกณฑ์เป้าหมายแล้ว")
-        elif current_p < 80:
-            st.info(f"ขาดอีก {80 - current_p} กรัม จะถึงเกณฑ์ขั้นต่ำ")
-        else:
-            st.warning("ทานโปรตีนเกินเป้าหมายสูงสุดเล็กน้อย ร่างกายอาจนำไปใช้ไม่หมด")
-
-    # ส่วนแสดงประวัติย้อนหลังล่างสุดของ Tab 1
-    st.markdown("---")
-    st.subheader("📜 ประวัติการออกกำลังกายย้อนหลัง")
-    if st.session_state.history:
-        df_history = pd.DataFrame(st.session_state.history)
-        st.dataframe(df_history, use_container_width=True)
-    else:
-        st.info("ยังไม่มีประวัติการบันทึกในเซสชั่นนี้")
+        if st.button("สมัครสมาชิกและคำนวณผล"):
+            if new_user in df_users["username"].values:
+                st.error("ชื่อผู้ใช้งานนี้มีคนใช้แล้ว กรุณาเปลี่ยนชื่อใหม่ครับ")
+            elif new_user == "" or new_pass == "":
+                st.error("กรุณากรอกชื่อผู้ใช้และรหัสผ่านให้ครบถ้วน")
+            else:
+                # 1. คำนวณ BMI
+                height_m = height / 100
+                bmi = round(weight / (height_m ** 2), 2)
+                
+                # 2. คำนวณโปรตีนที่เหมาะสมเฉพาะบุคคล (เน้นสร้างกล้ามเนื้อและเวทเทรนนิ่ง = น้ำหนักตัว x 1.5 ถึง 2.0 กรัม)
+                # เราใช้ค่ากลางที่เหมาะสมและปลอดภัยคือ 1.6 กรัมต่อน้ำหนักตัว
+                protein_target = int(weight * 1.6)
+                
+                # บันทึกลงฐานข้อมูล
+                new_row = pd.DataFrame([{
+                    "username": new_user, "password": str(new_pass),
+                    "weight": weight, "height": height, "bmi": bmi, "protein_target": protein_target
+                }])
+                df_users = pd.concat([df_users, new_row], ignore_index=True)
+                save_db(df_users, USER_DB)
+                st.success("สมัครสมาชิกสำเร็จ! กรุณาไปที่แท็บ ล็อกอิน เพื่อเข้าใช้งาน")
 
 # ==========================================
-# TAB 2: ปรับแต่งท่าออกกำลังกาย (Dynamic Setup)
+# หน้าจอหลักของแอปหลังจาก LOGIN สำเร็จ
 # ==========================================
-with tab2:
-    st.header("🛠️ ปรับแต่งตารางและจำนวนครั้งได้ตามใจชอบ")
-    st.write("คุณสามารถเปลี่ยนชื่อท่า ปรับเซ็ต/ครั้ง หรือเพิ่มท่าใหม่ในแต่ละวันได้จากส่วนนี้เลยครับ")
+else:
+    u_info = st.session_state.user_info
+    username = st.session_state.username
     
-    edit_day = st.selectbox("เลือกวันมัดกล้ามเนื้อที่ต้องการแก้ไขข้อมูล:", list(st.session_state.workout_program.keys()))
+    # ดึงผลการวิเคราะห์ BMI
+    bmi_val = u_info["bmi"]
+    if bmi_val < 18.5: bmi_status = "น้ำหนักต่ำกว่าเกณฑ์ 🦴"
+    elif bmi_val < 23.0: bmi_status = "สมส่วน สุขภาพดี 🟢"
+    elif bmi_val < 25.0: bmi_status = "น้ำหนักเกิน 🟡"
+    else: bmi_status = "เริ่มอ้วน / อ้วน 🔴"
     
-    # วนลูปแสดงข้อมูลเดิมเพื่อให้แก้ไขได้
-    updated_exercises = []
+    # แถบเมนูด้านบนแสดงข้อมูลส่วนบุคคล
+    st.title(f"💪 ยินดีต้อนรับคุณ {username} เข้าสู่ระบบ")
     
-    st.subheader(f"แก้ไขรายการท่าของ {edit_day}")
-    for idx, exercise in enumerate(st.session_state.workout_program[edit_day]):
-        st.markdown(f"**ท่าที่ {idx + 1}**")
-        c1, c2, c3 = st.columns([3, 1, 1])
-        with c1:
-            new_name = st.text_input("ชื่อท่าออกกำลังกาย", value=exercise['name'], key=f"name_{edit_day}_{idx}")
-        with c2:
-            new_sets = st.number_input("จำนวนเซ็ต", min_value=1, max_value=10, value=int(exercise['sets']), key=f"sets_{edit_day}_{idx}")
-        with c3:
-            new_reps = st.number_input("จำนวนครั้ง/วินาที", min_value=1, max_value=100, value=int(exercise['reps']), key=f"reps_{edit_day}_{idx}")
+    # กล่องโชว์สถานะสุขภาพเฉพาะบุคคล
+    c_bmi, c_prot, c_logout = st.columns([2, 2, 1])
+    with c_bmi:
+        st.info(f"📊 **ค่า BMI ของคุณ:** {bmi_val} ({bmi_status})")
+    with c_prot:
+        st.success(f"🥩 **เป้าหมายโปรตีนเฉพาะคุณ:** {u_info['protein_target']} กรัม / วัน (คำนวณจากน้ำหนักตัว)")
+    with c_logout:
+        if st.button("🔒 ออกจากระบบ"):
+            st.session_state.logged_in = False
+            st.rerun()
             
-        updated_exercises.append({"name": new_name, "sets": new_sets, "reps": new_reps})
-        
-    # ฟังก์ชันเพิ่มท่าใหม่เข้าไปในลิสต์
     st.markdown("---")
-    st.markdown("**➕ เพิ่มท่าใหม่เข้าไปในวันนี้**")
-    add_col1, add_col2, add_col3 = st.columns([3, 1, 1])
-    with add_col1:
-        add_name = st.text_input("ชื่อท่าใหม่ที่ต้องการเพิ่ม:", value="", key=f"add_name_{edit_day}")
-    with add_col2:
-        add_sets = st.number_input("จำนวนเซ็ตสำหรับท่าใหม่:", min_value=1, max_value=10, value=3, key=f"add_sets_{edit_day}")
-    with add_col3:
-        add_reps = st.number_input("จำนวนครั้งสำหรับท่าใหม่:", min_value=1, max_value=100, value=12, key=f"add_reps_{edit_day}")
-        
-    if st.button("➕ เพิ่มท่านี้เข้าไปในตาราง"):
-        if add_name:
-            updated_exercises.append({"name": add_name, "sets": add_sets, "reps": add_reps})
-            st.session_state.workout_program[edit_day] = updated_exercises
-            st.success(f"เพิ่มท่า {add_name} สำเร็จ!")
-            st.experimental_rerun()
-        else:
-            st.error("กรุณากรอกชื่อท่าก่อนกดเพิ่มครับ")
+    
+    tab1, tab2 = st.tabs(["🏋️ บันทึกกิจกรรมวันนี้", "📊 ดูสรุปประวัติวันต่อวัน"])
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    
+    # ตารางท่าออกกำลังกายพื้นฐาน
+    workout_program = {
+        "Push Day": ["Cat-Cow Warmup", "Dumbbell Floor Press", "Dumbbell Shoulder Press", "Lateral Raise", "Tricep Kickback"],
+        "Pull Day": ["Cat-Cow Warmup", "Dumbbell Row", "Dumbbell Bicep Curl", "Hammer Curl", "Plank / Bird-Dog"],
+        "Legs & Core": ["Cat-Cow Warmup", "Goblet Squat", "Dumbbell Romanian Deadlift", "Lying Leg Raise", "Bicycle Crunch"],
+        "Rest Day": ["Stretching เบาๆ", "Vestibular Exercise (ฝึกบาลานซ์หูชั้นใน)"]
+    }
+    
+    with tab1:
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            st.header("บันทึกการฝึก")
+            day_type = st.selectbox("เลือกโปรแกรมวันนี้:", list(workout_program.keys()))
+            
+            # โชว์เช็คลิสต์ท่า
+            all_done = True
+            for idx, ex in enumerate(workout_program[day_type]):
+                c = st.checkbox(ex, key=f"ex_{idx}")
+                if not c: all_done = False
+                
+            if st.button("💾 บันทึกกิจกรรม", type="primary"):
+                # ลบอันเก่าของวันนี้เฉพาะของ User นี้ออกก่อนกันซ้ำ
+                df_workout = df_workout[(df_workout["username"] != username) | (df_workout["date"] != today_str)]
+                new_w = pd.DataFrame([{"username": username, "date": today_str, "program": day_type, "status": "เสร็จสมบูรณ์" if all_done else "บางส่วน"}])
+                df_workout = pd.concat([df_workout, new_w], ignore_index=True)
+                save_db(df_workout, WORKOUT_DB)
+                st.success("บันทึกตารางฝึกสำเร็จ!")
+                
+        with col2:
+            st.header("แทร็กสารอาหาร")
+            # หาปริมาณโปรตีนสะสมวันนี้ของ User นี้
+            user_p_today = df_protein[(df_protein["username"] == username) & (df_protein["date"] == today_str)]
+            current_p = int(user_p_today["amount"].sum()) if not user_p_today.empty else 0
+            
+            st.metric(label="โปรตีนที่กินแล้ววันนี้", value=f"{current_p} / {u_info['protein_target']} กรัม")
+            
+            p_add = st.number_input("เพิ่มโปรตีน (กรัม):", min_value=0, max_value=200, step=5)
+            if st.button("➕ บันทึกมื้ออาหาร"):
+                df_protein = df_protein[(df_protein["username"] != username) | (df_protein["date"] != today_str)]
+                new_p = pd.DataFrame([{"username": username, "date": today_str, "amount": current_p + p_add}])
+                df_protein = pd.concat([df_protein, new_p], ignore_index=True)
+                save_db(df_protein, PROTEIN_DB)
+                st.success("อัปเดตปริมาณโปรตีนสำเร็จ!")
+                st.rerun()
 
-    # ปุ่มบันทึกการเปลี่ยนแปลงทั้งหมด
-    if st.button("💾 บันทึกการแก้ไขท่าทั้งหมดของวันนี้", type="primary"):
-        st.session_state.workout_program[edit_day] = updated_exercises
-        st.success(f"อัปเดตระบบตารางท่าของ {edit_day} เรียบร้อยแล้ว! ลองกลับไปดูหน้าแรกได้เลย")
+    with tab2:
+        st.header("📊 ประวัติการคำนวณและบันทึกย้อนหลังของคุณ")
+        
+        # กรองข้อมูลเฉพาะของ User ที่กำลัง Login อยู่เท่านั้น
+        u_workout = df_workout[df_workout["username"] == username]
+        u_protein = df_protein[df_protein["username"] == username]
+        
+        if not u_workout.empty or not u_protein.empty:
+            all_dates = pd.concat([u_workout["date"], u_protein["date"]]).unique()
+            summary = []
+            
+            for d in sorted(all_dates, reverse=True):
+                w_row = u_workout[u_workout["date"] == d]
+                p_row = u_protein[u_protein["date"] == d]
+                
+                prog = w_row["program"].values[0] if not w_row.empty else "ไม่ได้บันทึก"
+                stat = w_row["status"].values[0] if not w_row.empty else "-"
+                prot = p_row["amount"].values[0] if not p_row.empty else 0
+                
+                # ตรวจสอบกับเป้าหมายส่วนบุคคล
+                target = u_info['protein_target']
+                if prot >= target:
+                    p_eval = f"🟢 ครบเกณฑ์เป้าหมาย ({target}g)"
+                else:
+                    p_eval = f"🔴 ขาดอีก {target - prot}g"
+                    
+                summary.append({
+                    "วันที่": d, "ตารางที่เล่น": prog, "สถานะเวท": stat, "โปรตีนที่ได้รับ (กรัม)": prot, "สรุปผลโปรตีน": p_eval
+                })
+            st.dataframe(pd.DataFrame(summary), use_container_width=True)
+        else:
+            st.info("ยังไม่มีประวัติการบันทึกของคุณในระบบ")
